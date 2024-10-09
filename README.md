@@ -21,5 +21,3 @@ Förderkennzeichen: 01IS22053D
 ## Prediction Server
 
 Der Server der zum Ausführen der Modelle genutzt wird.
-
-Enthält außerdem die notwendigen Dateien zur Dokerisierung.
