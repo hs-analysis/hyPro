@@ -1,0 +1,3 @@
+ID;ang_open_percent;T_furnace_C;T_load_C;T_start_C;t_heat_s;t_heat_total_s;t_process_s;t_vacuum_s;t_z_cool_s;v_cool_mm_s;v_x_back_mm_s;v_x_towards_mm_s;v_z_up_mm_s;z_heat_mm;z_home_mm
+Label;Angle Open Percent;Furnace Temperature (¡C);Load Temperature (¡C);Start Temperature (¡C);Heating Time (s);Total Heating Time (s);Process Time (s);Vacuum Time (s);Cooling Time (s);Cooling Speed (mm/s);X Back Speed (mm/s);X Towards Speed (mm/s);Z Up Speed (mm/s);Heat Z Position (mm);Home Z Position (mm)
+Value;450;460;250;50;-27;100;1000;5;53.9;54;10;10;0;0;16.2
