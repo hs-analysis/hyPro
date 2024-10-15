@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    container_name: gradio_app
+    env_file:
+      - .env
+    ports:
+      - "7860:7860"
+    volumes:
+      - .:/app
+    command: bash -c "echo 'Open http://localhost:7860' && python app.py"
