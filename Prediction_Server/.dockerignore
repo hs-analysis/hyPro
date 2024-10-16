@@ -1,0 +1,25 @@
+#.dockerignore
+# File ignored by Docker when building the hyPro Server image
+
+# Copyright (c) HS Analysis GmbH, 2024
+# Author: Valentin Haas
+
+# Ignore python cache files
+*__pycache__/
+*.pyc
+
+# Ignore repository files
+.git
+.gitignore
+
+# Ignore the docker files
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Ignore existing logs
+server_logs/*
+*.log
+
+# Don't copy the ai models
+trained_models/*

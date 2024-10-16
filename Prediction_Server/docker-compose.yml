@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  hypro-predict:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - hypro/predict_server:0.2.0
+        - 388738514836.dkr.ecr.eu-central-1.amazonaws.com/hypro/predict_server:0.2.0
+    image: 388738514836.dkr.ecr.eu-central-1.amazonaws.com/hypro/predict_server:0.2.0
+    container_name: hypro-predict
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Mount the server_logs directory to the container
+      - type: bind
+        source: ./server_logs
+        target: /app/server_logs
+      # Mount the trained_models directory to the container
+      - type: bind
+        source: ./trained_models
+        target: /app/trained_models
