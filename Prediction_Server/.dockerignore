@@ -1,7 +1,6 @@
 #.dockerignore
 # File ignored by Docker when building the hyPro Server image
 
-# Copyright (c) HS Analysis GmbH, 2024
 # Author: Valentin Haas
 
 # Ignore python cache files
