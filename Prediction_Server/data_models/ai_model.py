@@ -15,6 +15,7 @@ import torch.nn as nn
 
 # Local Imports
 from ai_models.LSTM import LSTMModel
+from ai_models.MLP import TimeSeriesMLP
 
 
 class AIModel(BaseModel):
@@ -96,13 +97,38 @@ class AIModel(BaseModel):
         Returns:
             nn.Module: The loaded PyTorch model.
         """
-        checkpoint = torch.load(file_path, weights_only=False)
-        model_info = AIModel(**checkpoint)
-        model = LSTMModel(
-            input_size=len(model_info.input_cols),
-            output_size=len(model_info.output_cols),
-        )
-        model.load_state_dict(checkpoint["model_state_dict"])
-        model.eval()
+        if torch.cuda.is_available():
+            checkpoint = torch.load(file_path)
+        else:
+            checkpoint = torch.load(file_path, map_location=torch.device("cpu"))
+
+        model_info = AIModel.load_info(file_path)
+        model = None
+        try:
+            # Attempt to load into TimeSeriesMLP
+            model = TimeSeriesMLP(15, len(model_info.output_cols))
+            model.load_state_dict(checkpoint)
+        except Exception:
+            try:
+                # Attempt to load into LSTM with combined columns
+                model = LSTMModel(
+                    input_size=len(model_info.input_cols) + 15,
+                    output_size=len(model_info.output_cols),
+                )
+                model.load_state_dict(checkpoint)
+            except Exception:
+                try:
+                    # Attempt to load into basic LSTM
+                    model = LSTMModel(
+                        input_size=len(model_info.input_cols),
+                        output_size=len(model_info.output_cols),
+                    )
+                    model.load_state_dict(checkpoint)
+                except Exception:
+                    print("All model loading attempts failed")
+
+        # If loading succeeded, set model to evaluation mode
+        if model is not None:
+            model.eval()
 
         return model_info, model

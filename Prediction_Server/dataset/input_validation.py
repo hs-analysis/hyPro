@@ -2,7 +2,7 @@
 # Description: This file contains the input validation functions for the dataset module.
 
 # HS Analsis GmbH, 2024
-# Author: Valentin Haas
+# Author: Valentin Haas, Philipp Marquardt
 
 
 # python imports
@@ -12,12 +12,53 @@ import logging
 import pandas as pd
 
 # Internal Imports
-from ai_models import list_models
+from ai_models import list_models, list_models_and_paths
 from data_models.ai_model import AIModel
 
 
 # Setup Logging
 logger = logging.getLogger(__name__)
+
+
+def load_inference_model(model_id: str, model_version: str):
+    """
+    Check if the requested inference model exists and return it.
+
+    Args:
+        model_id (str): The ID of the model to check for.
+        model_version (str): The version of the model to check for.
+
+    Raises:
+        FileNotFoundError: If the requested model does not exist.
+        FileNotFoundError: If the requested model version does not exist.
+        ValueError: If multiple models with the same ID and version exist.
+
+    Returns:
+        AIModel: The requested AI model.
+    """
+    models = list_models_and_paths()
+    models_with_id = [model for model in models if model[0].id == model_id]
+    if not any(models_with_id):
+        msg = f'Model with ID "{model_id}" not found.'
+        logger.error(msg)
+        raise FileNotFoundError(msg)
+
+    # Check if the requested model version exists
+    models_with_version = [
+        model for model in models_with_id if model[0].version == model_version
+    ]
+    if not any(models_with_version):
+        msg = f'Model with ID "{model_id}" and version "{model_version}" not found.'
+        logger.error(msg)
+        raise FileNotFoundError(msg)
+
+    elif len(models_with_version) > 1:
+        msg = (
+            f'Multiple models with ID "{model_id}" and version "{model_version}" found.'
+        )
+        logger.error(msg)
+        raise ValueError(msg)
+    return AIModel.load_model(models_with_version[0][1])[1]
 
 
 def check_for_model(model_id: str, model_version: str) -> AIModel:
