@@ -1,7 +1,7 @@
-# hyPro/Prediction_Server/server.py
+# hyPro/Server/server.py
 # Main Entrypoint for the hyPro Server
 
-# HS Analysis GmbH, 2024
+# Copyright HS Analysis GmbH, 2024
 # Author: Valentin Haas
 
 # Python Imports
@@ -9,22 +9,25 @@ from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 import logging
-import random
 
 # External Imports
 from fastapi import FastAPI, HTTPException, UploadFile, Form, File
 import pandas as pd
+import torch.nn as nn
+
 
 # Local Imports
 from ai_models import list_models
 from data_models import AIModel, MachinePreset, PredictionResponse, PredictionSegment
-from dataset.input_validation import check_for_model, validate_columns
+from dataset.input_validation import (
+    check_for_model,
+    load_inference_model,
+)
 from dataset.clean import prepare_timeseries
 
 # Constants
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 CWD = Path(__file__).parent.resolve()
-
 
 LOG_FOLDER = CWD / "server_logs"
 
@@ -75,6 +78,41 @@ async def get_model(model_id: str, model_version: str) -> AIModel:
     """
     try:
         model = check_for_model(model_id, model_version)
+        logger.debug(
+            f"Retrieved model information for model {model_id}:{model_version}"
+        )
+        return model
+
+    except FileNotFoundError as fnf:
+        raise HTTPException(status_code=404, detail=str(fnf))
+
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    except Exception as e:
+        msg = f"Error while getting model information: {e}"
+        logger.error(msg)
+        raise HTTPException(status_code=500, detail=msg)
+
+
+async def load_model(model_id: str, model_version: str) -> nn.Module:
+    """
+    Load the inference model.
+
+    Args:
+        model_id (str): The ID of the model to load.
+        model_version (str): The version of the model to load.
+
+    Raises:
+        HTTPException: Model not found.
+        HTTPException: Model version not found.
+        HTTPException: Multiple models with the same ID and version found.
+
+    Returns:
+        AIModel: The model information for the given model ID and version.
+    """
+    try:
+        model = load_inference_model(model_id, model_version)
         logger.debug(
             f"Retrieved model information for model {model_id}:{model_version}"
         )
@@ -249,20 +287,15 @@ async def predict_from_timeseries(
     Returns:
         PredictionResponse: The predicted P2V and RMS values for the machine based on the input sensor timeseries data.
     """
-
-    model = await get_model(model_id, model_version)
+    # get model info for column information
+    info = await get_model(model_id, model_version)
+    # get inference model
+    model = await load_model(model_id, model_version)
+    # get model input
     model_input = await extract_timeseries_from_file(file)
 
-    # Check model - content compatibility
-    try:
-        validate_columns(set(sorted(model.input_cols)), model_input)
-    except ValueError as ve:
-        msg = f"Error while validating input data: {ve}"
-        logger.error(msg)
-        raise HTTPException(status_code=400, detail=msg)
-
-    # Clean the input data
-    prepared_input = prepare_timeseries(model_input, model)
+    # prepare input
+    prepared_input, length = prepare_timeseries(model_input, info.input_cols.keys())
 
     # Prefill the response with the request information
     response = PredictionResponse(
@@ -275,16 +308,20 @@ async def predict_from_timeseries(
     )
 
     try:
-        # Placeholder for actual prediction logic
-        grid = (5, 5)
+        output = model(prepared_input, length)
+        p2v, rms = (
+            output[0][0].cpu().detach().numpy(),
+            output[0][1].cpu().detach().numpy(),
+        )
+        grid = (1, 1)
         for i in range(grid[0] * grid[1]):
             x = i % grid[0]
             y = i // grid[1]
             response.segments.append(
                 PredictionSegment(
                     id=i,
-                    pred_p2v=random.uniform(0.0, 1.0),
-                    pred_rms=random.uniform(0.0, 1.0),
+                    pred_p2v=p2v,
+                    pred_rms=rms,
                     x_range_mm=(x * 10, (x + 1) * 10),
                     y_range_mm=(y * 10, (y + 1) * 10),
                     xy_location=(x, y),
@@ -319,21 +356,25 @@ async def predict_from_presets(
     Returns:
         PredictionResponse: The predicted P2V and RMS values for the machine with the given presets.
     """
-
-    model = await get_model(model_id, model_version)
-
-    # Prefill the response with the request information
+    # get inference model
+    model = await load_model(model_id, model_version)
     response = PredictionResponse(
         machine_id=machine_id,
-        ai_model_id=model.id,
-        ai_model_version=model.version,
+        ai_model_id=model_id,
+        ai_model_version=model_version,
         request_timestamp=datetime.now().isoformat(),
         response_time_s=0.0,
         segments=[],
     )
 
+    # prepare input
+    inp = presets.to_tensor()
     try:
-        # Placeholder for actual prediction logic
+        output = model(inp)
+        p2v, rms = (
+            output[0][0].cpu().detach().numpy(),
+            output[0][1].cpu().detach().numpy(),
+        )
         grid = (1, 1)
         for i in range(grid[0] * grid[1]):
             x = i % grid[0]
@@ -341,8 +382,8 @@ async def predict_from_presets(
             response.segments.append(
                 PredictionSegment(
                     id=i,
-                    pred_p2v=random.uniform(0.0, 1.0),
-                    pred_rms=random.uniform(0.0, 1.0),
+                    pred_p2v=p2v,
+                    pred_rms=rms,
                     x_range_mm=(x * 10, (x + 1) * 10),
                     y_range_mm=(y * 10, (y + 1) * 10),
                     xy_location=(x, y),
@@ -386,42 +427,43 @@ async def predict_from_presets_and_timeseries(
         msg = f"Error while parsing presets: {e}"
         logger.error(msg)
         raise HTTPException(status_code=400, detail=msg)
-
-    model = await get_model(model_id, model_version)
+    # get model information for input cols
+    info = await get_model(model_id, model_version)
+    # get inference model
+    model = await load_model(model_id, model_version)
+    # get model input
     model_input = await extract_timeseries_from_file(file)
 
-    # Check model - content compatibility
-    try:
-        validate_columns(set(sorted(model.input_cols)), model_input)
-    except ValueError as ve:
-        msg = f"Error while validating input data: {ve}"
-        logger.error(msg)
-        raise HTTPException(status_code=400, detail=msg)
-
-    # Clean the input data
-    prepared_input = prepare_timeseries(model_input, model)
+    # Prepare input data
+    prepared_input, length = prepare_timeseries(
+        model_input, info.input_cols.keys(), presets.to_array()
+    )
 
     # Prefill the response with the request information
     response = PredictionResponse(
         machine_id=machine_id,
-        ai_model_id=model.id,
-        ai_model_version=model.version,
+        ai_model_id=model_id,
+        ai_model_version=model_version,
         request_timestamp=datetime.now().isoformat(),
         response_time_s=0.0,
         segments=[],
     )
 
     try:
-        # Placeholder for actual prediction logic
-        grid = (1, 5)
+        output = model(prepared_input, length)
+        p2v, rms = (
+            output[0][0].cpu().detach().numpy(),
+            output[0][1].cpu().detach().numpy(),
+        )
+        grid = (1, 1)
         for i in range(grid[0] * grid[1]):
             x = i % grid[0]
             y = i // grid[1]
             response.segments.append(
                 PredictionSegment(
                     id=i,
-                    pred_p2v=random.uniform(0.0, 1.0),
-                    pred_rms=random.uniform(0.0, 1.0),
+                    pred_p2v=p2v,
+                    pred_rms=rms,
                     x_range_mm=(x * 10, (x + 1) * 10),
                     y_range_mm=(y * 10, (y + 1) * 10),
                     xy_location=(x, y),
