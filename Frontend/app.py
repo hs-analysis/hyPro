@@ -8,14 +8,16 @@ from io import StringIO
 import csv
 from datetime import datetime
 import json
-from sqlalchemy import create_engine
+import mysql.connector
+import string
 from dotenv import load_dotenv
 
-API_BASE_URL = "https://hypro-predict.hs-analysis.com"
+load_dotenv()
+api_base_url = os.getenv("API_BASE_URL")
 
 # Fetch the list of available models from the API
 try:
-    response = requests.get(f"{API_BASE_URL}/v1/models")
+    response = requests.get(f"{api_base_url}/v1/models")
     if response.status_code == 200:
         models_data = response.json()
         available_models = models_data.get("models", [])
@@ -103,7 +105,7 @@ def handle_user_inputs(
     heating_time_input, total_heating_time_input, process_time_input, vacuum_time_input, cooling_time_input,
     cooling_speed_input, x_back_speed_input, x_towards_speed_input, z_up_speed_input,
     heat_z_position_input, home_z_position_input,
-    database_table_name
+    database_tmpexp_table, database_ipt_table
 ):
     """
     Processes user inputs based on the selected input method and model.
@@ -134,7 +136,7 @@ def handle_user_inputs(
             "z_heat_mm": heat_z_position_input,
             "z_home_mm": home_z_position_input
         }
-        api_url = f"{API_BASE_URL}/v1/pred/from_presets/{model_id}/{model_version}/"
+        api_url = f"{api_base_url}/v1/pred/from_presets/{model_id}/{model_version}/"
         params = {'machine_id': machine_id_input}
         try:
             api_response = requests.post(api_url, json=payload, params=params)
@@ -174,7 +176,7 @@ def handle_user_inputs(
         if uploaded_csv_file is None:
             return {"error": "Please upload a CSV file."}, None, None, None, None, None, None, None, None
         else:
-            api_url = f"{API_BASE_URL}/v1/pred/from_timeseries/{model_id}/{model_version}/"
+            api_url = f"{api_base_url}/v1/pred/from_timeseries/{model_id}/{model_version}/"
             params = {'machine_id': machine_id_input}
 
             delimiter = csv_delimiter_input or ','
@@ -262,25 +264,140 @@ def handle_user_inputs(
             }, heatmap_fig, df_segments, gr.update(value=default_x), gr.update(value=default_y), timeline_fig, gr.update(minimum=0, maximum=duration, value=initial_time)
 
     elif input_method == "Database Input":
-        load_dotenv()
         db_username = os.getenv('DB_USERNAME')
         db_password = os.getenv('DB_PASSWORD')
         db_host = os.getenv('DB_HOST')
         db_port = os.getenv('DB_PORT')
         db_name = os.getenv('DB_NAME')
 
-        connection_string = f"mysql+pymysql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-        db_engine = create_engine(connection_string)
+        mydb = mysql.connector.connect(
+            host=db_host,
+            port=db_port,
+            user=db_username,
+            password=db_password,
+            database=db_name,
+        )
+        cursor = mydb.cursor()
+        # TODO: get from input
+        table1 = database_ipt_table
+        table2 = database_tmpexp_table
 
+        # validate table names
+        accaptable = set(string.ascii_letters + string.digits + '$' + '_') # set of valid sql table character if unquoted table name
+        if not set(table1).issubset(accaptable):
+            return {"error": f"Error: Invalid table name: {table1}"}, None, None, None, None, None, None
+        if not set(table2).issubset(accaptable):
+            return {"error": f"Error: Invalid table name: {table2}"}, None, None, None, None, None, None
+
+        sql = f"""SELECT 
+        DATE_FORMAT({table1}.`Timestamp`, '%Y-%m-%d-%H:%i:%s'),
+        {table1}.ta1,
+        {table1}.ta2,
+        {table1}.ta3,
+        {table1}.ta4,
+        {table1}.ta5,
+        {table1}.tb1,
+        tb2,
+        tb3,
+        tb4,
+        tb5,
+        tc1,
+        tc2,
+        tc3,
+        tc4,
+        tc5,
+        td1,
+        pz,
+        px,
+        fllr1,
+        flhr1,
+        xv,
+        zv,
+        av,
+        vs,
+        ht,
+        st,
+        sp1,
+        pc
+        FROM   {table1}
+        LEFT JOIN {table2}
+        ON 
+        ABS(TIMESTAMPDIFF(MICROSECOND , {table2}.`Timestamp`, {table1}.`Timestamp`)) < 500000
+        ORDER BY {table1}.timestamp DESC
+        LIMIT 900;
+        """
+        res = None
         try:
-            df_database = pd.read_sql_table(database_table_name, con=db_engine)
+            cursor.execute(sql)
+            res = cursor.fetchall()
         except Exception as e:
-            return {"error": f"Error reading data from table {database_table_name}: {str(e)}"}, None, None, None, None, None, None
+            return {"error": f"Error reading data from table {database_tmpexp_table}: {str(e)}"}, None, None, None, None, None, None
 
         csv_buffer = StringIO()
-        df_database.to_csv(csv_buffer, index=False)
-        csv_buffer.seek(0)
+        df = pd.DataFrame(res)
+        delimiter = ';'
+        quotechar = '"'
 
+        df.to_csv(csv_buffer, index=False, sep=";", header=["Timestamp", 
+                                                            "TA1", 
+                                                            "TA2", 
+                                                            "TA3", 
+                                                            "TA4", 
+                                                            "TA5", 
+                                                            "TB1", 
+                                                            "TB2", 
+                                                            "TB3", 
+                                                            "TB4", 
+                                                            "TB5", 
+                                                            "TC1", 
+                                                            "TC2", 
+                                                            "TC3", 
+                                                            "TC4", 
+                                                            "TC5", 
+                                                            "TD1", 
+                                                            "PZ", 
+                                                            "PX", 
+                                                            "FLLR1", 
+                                                            "FLHR1", 
+                                                            "XV", 
+                                                            "ZV", 
+                                                            "AV", 
+                                                            "VS", 
+                                                            "HT", 
+                                                            "ST", 
+                                                            "SP1", 
+                                                            "PC"
+                                                            ])
+
+        csv_buffer.seek(0)
+        reader = csv.reader(csv_buffer, delimiter=delimiter, quotechar=quotechar)
+        lines = list(reader)
+
+        header = lines[0]
+        data_lines = lines[1:]
+
+        if 'Timestamp' not in header:
+            return {"error": "CSV file must contain a 'Timestamp' column."}, None, None, None, None, None, None, None, None
+        timestamp_idx = header.index('Timestamp')
+
+        time_to_records = {}
+        for line in data_lines:
+            if len(line) != len(header):
+                continue
+            try:
+                timestamp = datetime.strptime(line[timestamp_idx], "%Y-%m-%d-%H:%M:%S").timestamp()
+            except ValueError:
+                continue
+            t = int(np.floor(timestamp))
+            if t not in time_to_records:
+                time_to_records[t] = []
+            line_str = delimiter.join([f'{quotechar}{field}{quotechar}' if delimiter in field or quotechar in field else field for field in line])
+            time_to_records[t].append(line_str)
+
+        if not time_to_records:
+            return {"error": "No valid data found in CSV file."}, None, None, None, None, None, None, None, None
+
+        api_responses = []
         machine_presets = {
             "ang_open_percent": ang_open_percent_input,
             "T_furnace_C": furnace_temp_input,
@@ -298,31 +415,42 @@ def handle_user_inputs(
             "z_heat_mm": heat_z_position_input,
             "z_home_mm": home_z_position_input
         }
-
-        api_url = f"{API_BASE_URL}/v1/pred/from_ps_and_ts/{model_id}/{model_version}/"
         params = {'machine_id': machine_id_input}
-        files = {'file': ('data.csv', csv_buffer, 'text/csv')}
-        data_payload = {'presets': json.dumps(machine_presets)}
-        try:
-            api_response = requests.post(api_url, files=files, data=data_payload, params=params)
-        except Exception as e:
-            return {"error": f"Error during API call: {str(e)}"}, None, None, None, None, None, None
+        api_url = f"{api_base_url}/v1/pred/from_ps_and_ts/{model_id}/{model_version}/"
+        for t in range(min(time_to_records.keys()), max(time_to_records.keys()) + 1):
+            header_line = delimiter.join([f'{quotechar}{col}{quotechar}' if delimiter in col or quotechar in col else col for col in header])
+            lines_up_to_t = [header_line]
+            for tt in range(min(time_to_records.keys()), t + 1):
+                if tt in time_to_records:
+                    lines_up_to_t.extend(time_to_records[tt])
 
-        if api_response.status_code == 200:
-            response_data = api_response.json()
-        else:
-            return {"error": f"API call failed with status code {api_response.status_code}: {api_response.text}"}, None, None, None, None, None, None
+            csv_buffer = StringIO('\n'.join(lines_up_to_t))
+            csv_buffer.seek(0)
+            csv_string = csv_buffer.getvalue()
+            csv_string = csv_string.replace('.',',')
+            files = {'file': ('data.csv', csv_string, 'text/csv'), 'presets': (None, json.dumps(machine_presets))}
+            try:
+                api_response = requests.post(api_url, files=files)
+            except Exception as e:
+                return {"error": f"Error during API call at t={t}: {str(e)}"}, None, None, None, None, None, None, None, None
 
-        segments = response_data.get("segments", [])
-        if not segments:
-            return {"error": "No segments found in API response."}, None, None, None, None, None, None
+            if api_response.status_code == 200:
+                response_data = api_response.json()
+                api_responses.append((t, response_data))
+            else:
+                return {"error": f"API call failed at t={t} with status code {api_response.status_code}: {api_response.text}"}, None, None, None, None, None, None, None, None
 
-        df_segments = pd.DataFrame(segments)
-        df_segments['time_relative'] = df_segments['time'] - df_segments['time'].min()
-
-        latest_time = df_segments['time'].max()
-        df_latest_time = df_segments[df_segments['time'] == latest_time]
-        heatmap_fig = generate_heatmap_plot(df_latest_time)
+        all_segments = []
+        for t, response_data in api_responses:
+            segments = response_data.get("segments", [])
+            for segment in segments:
+                segment['time'] = t
+                all_segments.append(segment)
+        df_segments = pd.DataFrame(all_segments)
+        df_segments['time_relative'] = df_segments['time'] - min(time_to_records.keys())
+        initial_time = int(df_segments['time_relative'].max())
+        df_initial_time = df_segments[df_segments['time_relative'] == initial_time]
+        heatmap_fig = generate_heatmap_plot(df_initial_time)
 
         if not df_segments.empty:
             default_x = df_segments['xy_location'].iloc[0][0]
@@ -337,8 +465,8 @@ def handle_user_inputs(
 
         return {
             "message": "Success",
-            "start_time": str(df_segments['time'].min()),
-            "end_time": str(df_segments['time'].max()),
+            "start_time": datetime.fromtimestamp(min(time_to_records.keys())).strftime('%Y-%m-%d %H:%M:%S'),
+            "end_time": datetime.fromtimestamp(max(time_to_records.keys())).strftime('%Y-%m-%d %H:%M:%S'),
         }, heatmap_fig, df_segments, gr.update(value=default_x), gr.update(value=default_y), timeline_fig, gr.update(minimum=0, maximum=duration, value=initial_time)
 
     else:
@@ -602,7 +730,8 @@ with gr.Blocks() as demo:
 
                 with gr.Group(visible=False) as database_input_group:
                     gr.Markdown("## Database Input Fields")
-                    database_table_name = gr.Textbox(label="Table Name", placeholder="Enter the database table name")
+                    database_tempexp_table = gr.Textbox(label="Tempexp Table Name", placeholder="Enter the tempexp table name")
+                    database_ipt_table = gr.Textbox(label="IPT Table Name", placeholder="Enter the ipt table name")
 
                 def update_input_components(selected_input_method, selected_model_name):
                     updated_required_inputs = display_model_input_requirements(selected_model_name, selected_input_method)
@@ -690,7 +819,7 @@ with gr.Blocks() as demo:
                     heating_time_input, total_heating_time_input, process_time_input, vacuum_time_input, cooling_time_input,
                     cooling_speed_input, x_back_speed_input, x_towards_speed_input, z_up_speed_input,
                     heat_z_position_input, home_z_position_input,
-                    database_table_name
+                    database_tempexp_table, database_ipt_table
                 ],
                 outputs=[
                     api_response_json,

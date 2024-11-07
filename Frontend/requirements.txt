@@ -1,8 +1,9 @@
-SQLAlchemy>=1.4
+# SQLAlchemy>=1.4
 mariadb
 pandas
 gradio
 python-dotenv
 matplotlib
-pymysql
+# pymysql
 plotly
+mysql-connector-python
