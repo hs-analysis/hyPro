@@ -5,6 +5,8 @@ Projektlaufzeit: 11/2022 bis 10/2024
 
 Das Forschungsprojekt »hyPro« wird vom Bundesministerium für Bildung und Forschung (BMBF) im Rahmen des Förderprogramms KI4KMU gefördert.
 
+![BMBF Logo](https://www.bmbf.de/SiteGlobals/Frontend/Images/icons/_common/logo.svg?__blob=normal&v=6)
+
 Förderkennzeichen: 01IS22053D
 
 ## Projektpartner
